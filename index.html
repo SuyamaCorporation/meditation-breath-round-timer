@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>瞑想呼吸ラウンドタイマー</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @keyframes breatheIn {
+      from { transform: scale(0.5); opacity: 0.6; }
+      to   { transform: scale(1.0); opacity: 1.0; }
+    }
+    @keyframes breatheOut {
+      from { transform: scale(1.0); opacity: 1.0; }
+      to   { transform: scale(0.5); opacity: 0.6; }
+    }
+    @keyframes breatheHold {
+      from { transform: scale(1.0); }
+      to   { transform: scale(1.0); }
+    }
+    @keyframes breatheHoldSmall {
+      from { transform: scale(0.5); }
+      to   { transform: scale(0.5); }
+    }
+    .anim-in     { animation: breatheIn var(--dur, 4s) ease-in-out forwards; }
+    .anim-out    { animation: breatheOut var(--dur, 4s) ease-in-out forwards; }
+    .anim-hold   { animation: breatheHold var(--dur, 7s) linear forwards; }
+    .anim-holds  { animation: breatheHoldSmall var(--dur, 4s) linear forwards; }
+    .circle-bg {
+      position: absolute; inset: 0; border-radius: 50%;
+      background: radial-gradient(circle, #818cf8 0%, #4f46e5 60%, #3730a3 100%);
+    }
+    .circle-wrap {
+      position: relative; width: 180px; height: 180px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .circle-ring {
+      position: absolute; inset: -8px; border-radius: 50%;
+      border: 3px solid rgba(99,102,241,0.3);
+    }
+  </style>
+</head>
+<body class="bg-gradient-to-br from-indigo-950 via-indigo-900 to-purple-950 min-h-screen font-sans text-white">
+
+<header class="py-4 px-6">
+  <h1 class="text-xl font-bold text-indigo-200">🧘 瞑想呼吸ラウンドタイマー</h1>
+</header>
+
+<main class="max-w-lg mx-auto px-4 pb-10 space-y-6">
+
+  <!-- パターン選択 -->
+  <section class="bg-white/10 backdrop-blur rounded-2xl p-5" aria-label="呼吸パターン選択">
+    <h2 class="text-sm font-bold text-indigo-300 mb-3 uppercase tracking-wide">呼吸パターン</h2>
+    <div id="patternList" class="grid grid-cols-1 gap-2" role="radiogroup" aria-label="呼吸パターン"></div>
+  </section>
+
+  <!-- 設定 -->
+  <section class="bg-white/10 backdrop-blur rounded-2xl p-5" aria-label="セッション設定">
+    <h2 class="text-sm font-bold text-indigo-300 mb-3 uppercase tracking-wide">設定</h2>
+    <div class="flex items-center gap-4">
+      <label for="roundCount" class="text-sm text-indigo-200">ラウンド数</label>
+      <input id="roundCount" type="number" min="3" max="20" value="5" class="w-20 bg-white/20 border border-indigo-400/40 rounded-lg px-3 py-1.5 text-sm text-white text-center focus:outline-none focus:ring-2 focus:ring-indigo-400" aria-label="ラウンド数（3〜20）" />
+      <span class="text-sm text-indigo-300">回</span>
+    </div>
+  </section>
+
+  <!-- タイマー表示 -->
+  <section class="flex flex-col items-center py-6" aria-label="タイマー表示">
+    <div class="circle-wrap mb-6" id="circleWrap" aria-live="polite" aria-atomic="true">
+      <div class="circle-ring"></div>
+      <div class="circle-bg" id="circleEl"></div>
+      <div class="relative z-10 text-center select-none">
+        <div id="countdownNum" class="text-5xl font-bold leading-none text-white drop-shadow-lg">—</div>
+        <div id="phaseLabel" class="text-xs font-medium text-indigo-200 mt-1">待機中</div>
+      </div>
+    </div>
+
+    <div id="roundInfo" class="text-sm text-indigo-300 mb-4" aria-live="polite">ラウンド 0 / 0</div>
+
+    <div class="flex gap-3">
+      <button id="startBtn" class="bg-indigo-500 hover:bg-indigo-600 text-white font-bold px-8 py-3 rounded-xl text-base transition shadow-lg" aria-label="セッション開始">開始</button>
+      <button id="stopBtn" class="bg-white/20 hover:bg-white/30 text-white font-medium px-6 py-3 rounded-xl text-sm transition hidden" aria-label="セッション停止">停止</button>
+    </div>
+  </section>
+
+  <!-- セッション履歴 -->
+  <section class="bg-white/10 backdrop-blur rounded-2xl p-5" aria-label="セッション履歴">
+    <div class="flex items-center justify-between mb-2">
+      <h2 class="text-sm font-bold text-indigo-300 uppercase tracking-wide">完了セッション数</h2>
+      <button id="resetStatsBtn" class="text-xs text-indigo-400 hover:text-red-400 transition" aria-label="統計をリセット">リセット</button>
+    </div>
+    <div class="flex items-end gap-2">
+      <span id="sessionCount" class="text-5xl font-bold text-indigo-200">0</span>
+      <span class="text-indigo-400 mb-1">セッション</span>
+    </div>
+    <div id="sessionHistory" class="mt-3 space-y-1 max-h-32 overflow-y-auto" aria-label="セッション完了履歴"></div>
+  </section>
+
+</main>
+
+<script>
+const STORAGE_KEY = 'breath_timer_v1';
+
+const PATTERNS = [
+  {
+    id: '478',
+    name: '4-7-8呼吸法',
+    desc: '副交感神経を活性化・深いリラックス',
+    phases: [
+      { label: '吸ってください', type: 'in',   dur: 4 },
+      { label: '保持',           type: 'hold', dur: 7 },
+      { label: '吐いてください', type: 'out',  dur: 8 }
+    ]
+  },
+  {
+    id: 'box',
+    name: 'ボックスブリージング',
+    desc: '集中力向上・ストレス軽減',
+    phases: [
+      { label: '吸ってください', type: 'in',      dur: 4 },
+      { label: '保持',           type: 'hold',    dur: 4 },
+      { label: '吐いてください', type: 'out',     dur: 4 },
+      { label: '保持',           type: 'holds',   dur: 4 }
+    ]
+  },
+  {
+    id: 'abdominal',
+    name: '腹式呼吸',
+    desc: 'シンプルな深呼吸・入門向け',
+    phases: [
+      { label: '吸ってください', type: 'in',  dur: 5 },
+      { label: '吐いてください', type: 'out', dur: 7 }
+    ]
+  }
+];
+
+let state = {
+  selectedPattern: '478',
+  rounds: 5,
+  sessions: []  // [{date, pattern, rounds}]
+};
+
+function save() { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+function load() {
+  try {
+    const d = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
+    if (d) state = Object.assign(state, d);
+  } catch(e) {}
+}
+
+// Audio
+let audioCtx = null;
+function getAudioCtx() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  return audioCtx;
+}
+function playBeep(freq, duration, vol=0.15) {
+  try {
+    const ctx = getAudioCtx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(freq, ctx.currentTime);
+    gain.gain.setValueAtTime(vol, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + duration);
+  } catch(e) {}
+}
+
+// Timer state
+let timerRunning = false;
+let timerCancel = null;
+
+function getPattern() { return PATTERNS.find(p => p.id === state.selectedPattern) || PATTERNS[0]; }
+
+function sleep(ms) {
+  return new Promise((resolve, reject) => {
+    const id = setTimeout(resolve, ms);
+    if (timerCancel) {
+      const prev = timerCancel;
+      timerCancel = () => { clearTimeout(id); prev(); reject('cancelled'); };
+    } else {
+      timerCancel = () => { clearTimeout(id); reject('cancelled'); };
+    }
+  });
+}
+
+function setCircleAnim(type, durSec) {
+  const el = document.getElementById('circleEl');
+  el.style.setProperty('--dur', durSec + 's');
+  el.className = 'circle-bg';
+  void el.offsetWidth; // reflow
+  if (type === 'in')    el.classList.add('anim-in');
+  else if (type === 'out')  el.classList.add('anim-out');
+  else if (type === 'hold') el.classList.add('anim-hold');
+  else if (type === 'holds') el.classList.add('anim-holds');
+}
+
+function setPhaseUI(phaseLabel, type, durSec, countdown) {
+  document.getElementById('phaseLabel').textContent = phaseLabel;
+  document.getElementById('countdownNum').textContent = countdown;
+  const colors = {
+    in:     'from-blue-400 to-indigo-600',
+    out:    'from-purple-500 to-indigo-800',
+    hold:   'from-green-400 to-teal-600',
+    holds:  'from-indigo-700 to-indigo-900'
+  };
+}
+
+async function runSession() {
+  const pattern = getPattern();
+  const rounds = Math.max(3, Math.min(20, parseInt(document.getElementById('roundCount').value) || 5));
+  timerRunning = true;
+  timerCancel = null;
+
+  document.getElementById('startBtn').classList.add('hidden');
+  document.getElementById('stopBtn').classList.remove('hidden');
+
+  try {
+    for (let r = 1; r <= rounds; r++) {
+      document.getElementById('roundInfo').textContent = `ラウンド ${r} / ${rounds}`;
+      for (let pi = 0; pi < pattern.phases.length; pi++) {
+        const phase = pattern.phases[pi];
+        setCircleAnim(phase.type, phase.dur);
+
+        // beep at start of phase
+        const freq = phase.type === 'in' ? 440 : phase.type === 'out' ? 330 : 500;
+        playBeep(freq, 0.3);
+
+        for (let t = phase.dur; t >= 1; t--) {
+          document.getElementById('phaseLabel').textContent = phase.label;
+          document.getElementById('countdownNum').textContent = t;
+          await sleep(1000);
+        }
+      }
+    }
+
+    // Session complete
+    const beepFreqs = [523, 659, 784];
+    for (const f of beepFreqs) { playBeep(f, 0.4, 0.2); await sleep(200); }
+
+    state.sessions.unshift({ date: new Date().toLocaleString('ja-JP'), pattern: pattern.name, rounds });
+    if (state.sessions.length > 50) state.sessions = state.sessions.slice(0, 50);
+    save();
+    renderStats();
+
+    document.getElementById('phaseLabel').textContent = '完了！おつかれさまでした';
+    document.getElementById('countdownNum').textContent = '✓';
+    document.getElementById('roundInfo').textContent = `${rounds}ラウンド完了`;
+    setCircleAnim('in', 2);
+
+  } catch(e) {
+    if (e !== 'cancelled') console.error(e);
+    document.getElementById('phaseLabel').textContent = '停止しました';
+    document.getElementById('countdownNum').textContent = '—';
+  } finally {
+    timerRunning = false;
+    timerCancel = null;
+    document.getElementById('startBtn').classList.remove('hidden');
+    document.getElementById('stopBtn').classList.add('hidden');
+  }
+}
+
+function stopSession() {
+  if (timerCancel) timerCancel();
+}
+
+function renderPatterns() {
+  const container = document.getElementById('patternList');
+  container.innerHTML = '';
+  PATTERNS.forEach(p => {
+    const btn = document.createElement('button');
+    const selected = state.selectedPattern === p.id;
+    btn.className = `w-full text-left p-3 rounded-xl border transition ${selected ? 'bg-indigo-500/50 border-indigo-400 text-white' : 'bg-white/5 border-white/10 text-indigo-200 hover:bg-white/10'}`;
+    btn.setAttribute('role', 'radio');
+    btn.setAttribute('aria-checked', selected ? 'true' : 'false');
+    btn.setAttribute('aria-label', p.name);
+    btn.innerHTML = `
+      <div class="flex items-center gap-2">
+        <span class="w-4 h-4 rounded-full border-2 flex-shrink-0 ${selected ? 'border-white bg-white' : 'border-indigo-400'}"></span>
+        <div>
+          <div class="text-sm font-bold">${p.name /* xss-ok: PATTERNSハードコード配列のname */}</div>
+          <div class="text-xs opacity-70">${p.desc /* xss-ok: PATTERNSハードコード配列のdesc */} · ${p.phases.map(ph => ph.dur /* xss-ok: PATTERNSハードコード配列の数値 */).join('-')}秒</div>
+        </div>
+      </div>
+    `;
+    btn.addEventListener('click', () => {
+      if (timerRunning) return;
+      state.selectedPattern = p.id;
+      save(); renderPatterns();
+    });
+    container.appendChild(btn);
+  });
+}
+
+function renderStats() {
+  document.getElementById('sessionCount').textContent = state.sessions.length;
+  const history = document.getElementById('sessionHistory');
+  history.innerHTML = '';
+  state.sessions.slice(0, 10).forEach(s => {
+    const div = document.createElement('div');
+    div.className = 'text-xs text-indigo-400 flex justify-between';
+    div.innerHTML = `<span>${s.date /* xss-ok: new Date().toLocaleString()生成の日時文字列 */}</span><span>${s.pattern /* xss-ok: PATTERNSハードコード配列のname */} ${s.rounds /* xss-ok: 整数ラウンド数 */}R</span>`;
+    history.appendChild(div);
+  });
+  if (state.sessions.length === 0) {
+    history.innerHTML = '<p class="text-xs text-indigo-500">まだセッション完了はありません。</p>';
+  }
+}
+
+// Init
+load();
+renderPatterns();
+renderStats();
+
+document.getElementById('startBtn').addEventListener('click', () => {
+  if (timerRunning) return;
+  runSession();
+});
+
+document.getElementById('stopBtn').addEventListener('click', () => {
+  stopSession();
+});
+
+document.getElementById('resetStatsBtn').addEventListener('click', () => {
+  if (!confirm('セッション履歴をリセットしますか？')) return;
+  state.sessions = [];
+  save(); renderStats();
+});
+
+document.getElementById('roundCount').addEventListener('change', () => {
+  const v = Math.max(3, Math.min(20, parseInt(document.getElementById('roundCount').value) || 5));
+  document.getElementById('roundCount').value = v;
+});
+</script>
+</body>
+</html>
